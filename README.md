@@ -6,6 +6,7 @@ This library provides an in-memory key/value store for a single process, intende
 
 # Benchmarks
 
+```
 go test -benchmem -bench . ./
 goos: linux
 goarch: amd64
@@ -19,7 +20,9 @@ BenchmarkDatKeyGet_sync-8                 928467              1244 ns/op        
 BenchmarkDatKeyGet_async-8               1000000              1033 ns/op              89 B/op          2 allocs/op
 BenchmarkDatKeyGet_multikey_sync-8        378552              2739 ns/op              78 B/op          2 allocs/op
 BenchmarkDatKeyGet_multikey_async-8      2969695               455.9 ns/op            72 B/op          2 allocs/op
+```
 
+```
 go test -benchmem -bench . ./lib/errors
 goos: linux
 goarch: amd64
@@ -31,3 +34,4 @@ BenchmarkErrorsWrapGolang-8              6140090               177.6 ns/op      
 BenchmarkErrorsNewFromError-8           24258693                51.13 ns/op           64 B/op          1 allocs/op
 BenchmarkErrorsErrorGolang-8            1000000000               0.3668 ns/op          0 B/op          0 allocs/op
 BenchmarkErrorsError-8                  350791375                3.394 ns/op           0 B/op          0 allocs/op
+```
