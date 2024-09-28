@@ -3,7 +3,7 @@ package errors_test
 import (
 	"testing"
 
-	"datkey/lib/errors"
+	"github.com/wspowell/datkey/lib/errors"
 )
 
 type TestError errors.Cause

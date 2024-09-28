@@ -9,7 +9,7 @@ package hashtag
 import (
 	"strings"
 
-	"datkey/hash/internal/rand"
+	"github.com/wspowell/datkey/hash/internal/rand"
 )
 
 const slotNumber = 16384

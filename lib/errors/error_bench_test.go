@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	"datkey/lib/errors"
+	"github.com/wspowell/datkey/lib/errors"
 )
 
 type BenchError errors.Cause

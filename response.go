@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"datkey/lib/errors"
+	"github.com/wspowell/datkey/lib/errors"
 )
 
 //nolint:gochecknoglobals // reason: sync.Pool is one of the few exceptions that makes sense as a global.

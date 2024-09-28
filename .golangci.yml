@@ -263,7 +263,7 @@ linters-settings:
         # Packages that are not allowed where the value is a suggestion.
         deny:
           - pkg: "errors"
-            desc: "replace with datkey/result/errors"
+            desc: "replace with github.com/wspowell/datkey/errors"
 
 
   dogsled:
@@ -374,7 +374,7 @@ linters-settings:
     sections: 
       - standard # Standard section: captures all standard packages.
       - default # Default section: contains all imports that could not be matched to another section type.
-      - prefix(datkey)
+      - prefix(github.com/wspowell/datkey)
       # - prefix() # Custom section: groups all imports with the specified Prefix.
       # - blank # Blank section: contains all blank imports. This section is not present unless explicitly enabled.
       # - dot # Dot section: contains all dot imports. This section is not present unless explicitly enabled.

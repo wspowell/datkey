@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"datkey/lib/errors"
+	"github.com/wspowell/datkey/lib/errors"
 )
 
 type EvictionStrategy string

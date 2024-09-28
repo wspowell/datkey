@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"datkey"
+	"github.com/wspowell/datkey"
 )
 
 func TestDatkey_Set_Get(t *testing.T) {

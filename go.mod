@@ -1,4 +1,4 @@
-module datkey
+module github.com/wspowell/datkey
 
 go 1.23
 

@@ -6,7 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"datkey/lib/errors"
+	"github.com/wspowell/datkey/lib/errors"
 )
 
 func TestErrors_New(t *testing.T) {

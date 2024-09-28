@@ -1,7 +1,7 @@
 package hash
 
 import (
-	"datkey/hash/internal/hashtag"
+	"github.com/wspowell/datkey/hash/internal/hashtag"
 )
 
 type Slot uint16

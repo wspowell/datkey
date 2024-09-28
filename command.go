@@ -6,8 +6,8 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"datkey/hash"
-	"datkey/lib/errors"
+	"github.com/wspowell/datkey/hash"
+	"github.com/wspowell/datkey/lib/errors"
 )
 
 type empty = struct{}

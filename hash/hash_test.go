@@ -6,7 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"datkey/hash"
+	"github.com/wspowell/datkey/hash"
 )
 
 func Test_Slot(t *testing.T) {

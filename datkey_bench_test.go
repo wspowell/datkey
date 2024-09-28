@@ -5,7 +5,7 @@ import (
 
 	"github.com/hashicorp/go-uuid"
 
-	"datkey"
+	"github.com/wspowell/datkey"
 )
 
 // Generate guids to avoid impacting benchmarks with guid generation.

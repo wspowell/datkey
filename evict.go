@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"datkey/hash"
+	"github.com/wspowell/datkey/hash"
 )
 
 func startEvictionWorker(ctx context.Context, config Config, slotCommandInput []chan<- command) <-chan struct{} {

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"datkey/hash"
+	"github.com/wspowell/datkey/hash"
 )
 
 func startSlotWorkers(config Config) []chan<- command {
