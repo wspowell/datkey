@@ -79,6 +79,9 @@ func (self *Datkey) Close() {
 	<-self.waitForEvictionWorker
 	<-self.waitForExpireWorker
 
+	// Wait for any outstanding commands to complete or timeout.
+	time.Sleep(self.config.CommandTimeout)
+
 	for index := range self.slotCommandInput {
 		close(self.slotCommandInput[index])
 	}
@@ -113,6 +116,11 @@ func (self *Datkey) Persist(key string) (PersistResponse, *errors.Error[DbWriteE
 // Ttl value of a key in the database.
 func (self *Datkey) Ttl(key string) (TtlResponse, *errors.Error[DbReadErr]) {
 	return ttlKey(key, self.slotCommandInput, self.config.CommandTimeout)
+}
+
+// Ttl value of a key in the database.
+func (self *Datkey) Ping() *errors.Error[DbReadErr] {
+	return ping(self.slotCommandInput, self.config.CommandTimeout)
 }
 
 func (self *Datkey) Stats() (StatsResponse, *errors.Error[DbReadErr]) {

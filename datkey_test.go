@@ -10,6 +10,19 @@ import (
 	"github.com/wspowell/datkey"
 )
 
+func TestDatkey_Ping(t *testing.T) {
+	t.Parallel()
+
+	var config datkey.Config
+	client := datkey.New(config)
+	defer client.Close()
+
+	{
+		err := client.Ping()
+		assert.Nil(t, err)
+	}
+}
+
 func TestDatkey_Set_Get(t *testing.T) {
 	t.Parallel()
 
@@ -76,6 +89,39 @@ func TestDatkey_Set_ttl_Expire(t *testing.T) {
 		result, err := client.Expire("test", ttl)
 		assert.Nil(t, err)
 		assert.False(t, result.Exists)
+	}
+}
+
+func TestDatkey_Set_ttl_Expire_race(t *testing.T) {
+	t.Parallel()
+
+	var config datkey.Config
+	client := datkey.New(config)
+	defer client.Close()
+
+	value := []byte("value")
+	ttl := time.Second
+	{
+		result, err := client.Set("test", value, ttl)
+		assert.Nil(t, err)
+		assert.False(t, result.Exists)
+		assert.Nil(t, result.PreviousValue)
+	}
+
+	done := time.After(ttl)
+	for {
+		select {
+		case <-done:
+			return
+		default:
+			result, err := client.Get("test")
+			assert.Nil(t, err)
+			if result.Exists {
+				assert.Equal(t, value, result.Value)
+			} else {
+				assert.Nil(t, result.Value)
+			}
+		}
 	}
 }
 

@@ -118,6 +118,31 @@ func (self keyStorage) isExpired() bool {
 	return !self.expiresAt.IsZero() && self.expiresAt.Before(time.Now())
 }
 
+func ping(slotCommandInput []chan<- command, commandTimeout time.Duration) *errors.Error[DbReadErr] {
+	for index := range slotCommandInput {
+		resp := newResponse[struct{}]()
+
+		commandChannel := slotCommandInput[index]
+		go func(slotCommands chan<- command, resp *response[struct{}]) {
+			slotCommands <- commandPing{
+				Resp: resp,
+			}
+		}(commandChannel, resp)
+
+		_, err := resp.await(commandTimeout)
+		if err != nil {
+			switch err.Cause {
+			case canceled:
+				return errors.NewFromError(DbReadCanceled, err)
+			default:
+				return errors.NewFromError(DbReadInternal, err)
+			}
+		}
+	}
+
+	return nil
+}
+
 func setKey(key string, value []byte, ttl time.Duration, slotCommandInput []chan<- command, commandTimeout time.Duration) (SetResponse, *errors.Error[DbWriteErr]) {
 	var expiresAt time.Time
 	if ttl != 0 {

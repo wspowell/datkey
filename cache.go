@@ -15,18 +15,10 @@ func startSlotWorkers(config Config) []chan<- command {
 		slotCommandInput[slot] = commandChannel
 
 		go slotWorker(commandChannel)
+	}
 
-		resp := newResponse[struct{}]()
-
-		go func(slotCommands chan<- command, resp *response[struct{}]) {
-			slotCommands <- commandPing{
-				Resp: resp,
-			}
-		}(commandChannel, resp)
-
-		if _, err := resp.await(config.CommandTimeout); err != nil {
-			panic("failed to start slot workers")
-		}
+	if err := ping(slotCommandInput, config.CommandTimeout); err != nil {
+		panic(fmt.Sprintf("failed to start slot workers (timeout=%fs): %+v", config.CommandTimeout.Seconds(), err))
 	}
 
 	return slotCommandInput
@@ -70,7 +62,7 @@ func commandHandler(cache *slotCache, command command) {
 			exists = false
 			data.value = nil
 			delete(cache.storage, cmd.Key)
-		} else {
+		} else if exists {
 			data.lastAccessTime = time.Now()
 			cache.storage[cmd.Key] = data
 		}
@@ -87,7 +79,7 @@ func commandHandler(cache *slotCache, command command) {
 			exists = false
 			previousData.value = nil
 			delete(cache.storage, cmd.Key)
-		} else {
+		} else if exists {
 			previousData.expiresAt = cmd.ExpiresAt
 			cache.storage[cmd.Key] = previousData
 		}
@@ -101,7 +93,7 @@ func commandHandler(cache *slotCache, command command) {
 			cache.sizeInBytes += int64(-len(previousData.value))
 			exists = false
 			delete(cache.storage, cmd.Key)
-		} else {
+		} else if exists {
 			previousData.expiresAt = time.Time{}
 			cache.storage[cmd.Key] = previousData
 		}
@@ -116,7 +108,7 @@ func commandHandler(cache *slotCache, command command) {
 			cache.sizeInBytes += int64(-len(previousData.value))
 			exists = false
 			delete(cache.storage, cmd.Key)
-		} else if !previousData.expiresAt.IsZero() {
+		} else if exists && !previousData.expiresAt.IsZero() {
 			ttl = time.Until(previousData.expiresAt)
 		}
 		cmd.Resp.send(ttlResponse{
