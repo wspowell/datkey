@@ -7,7 +7,6 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/wspowell/datkey/hash"
-	"github.com/wspowell/datkey/lib/errors"
 )
 
 type empty = struct{}
@@ -15,11 +14,11 @@ type empty = struct{}
 type command any
 
 type commandPing struct {
-	Resp *response[empty]
+	Resp empty
 }
 
 type commandStats struct {
-	Resp *response[statsResponse]
+	Resp *statsResponse
 }
 
 type statsResponse struct {
@@ -31,7 +30,7 @@ type StatsResponse struct {
 }
 
 type commandSet struct {
-	Resp *response[valueResponse]
+	Resp *valueResponse
 	Key  string
 	data keyStorage
 }
@@ -42,7 +41,7 @@ type SetResponse struct {
 }
 
 type commandGet struct {
-	Resp *response[valueResponse]
+	Resp *valueResponse
 	Key  string
 }
 
@@ -52,7 +51,7 @@ type GetResponse struct {
 }
 
 type commandDelete struct {
-	Resp *response[valueResponse]
+	Resp *valueResponse
 	Key  string
 }
 
@@ -62,11 +61,11 @@ type DeleteResponse struct {
 }
 
 type commandDeleteExpired struct {
-	Resp *response[valueResponse]
+	Resp *valueResponse
 }
 
 type commandExpire struct {
-	Resp      *response[valueResponse]
+	Resp      *valueResponse
 	ExpiresAt time.Time
 	Key       string
 }
@@ -76,7 +75,7 @@ type ExpireResponse struct {
 }
 
 type commandPersist struct {
-	Resp *response[valueResponse]
+	Resp *valueResponse
 	Key  string
 }
 
@@ -85,7 +84,7 @@ type PersistResponse struct {
 }
 
 type commandTtl struct {
-	Resp *response[ttlResponse]
+	Resp *ttlResponse
 	Key  string
 }
 
@@ -111,39 +110,14 @@ type keyStorage struct {
 }
 
 type commandDeleteLru struct {
-	Resp *response[valueResponse]
+	Resp *valueResponse
 }
 
 func (self keyStorage) isExpired() bool {
 	return !self.expiresAt.IsZero() && self.expiresAt.Before(time.Now())
 }
 
-func ping(slotCommandInput []chan<- command, commandTimeout time.Duration) *errors.Error[DbReadErr] {
-	for index := range slotCommandInput {
-		resp := newResponse[struct{}]()
-
-		commandChannel := slotCommandInput[index]
-		go func(slotCommands chan<- command, resp *response[struct{}]) {
-			slotCommands <- commandPing{
-				Resp: resp,
-			}
-		}(commandChannel, resp)
-
-		_, err := resp.await(commandTimeout)
-		if err != nil {
-			switch err.Cause {
-			case canceled:
-				return errors.NewFromError(DbReadCanceled, err)
-			default:
-				return errors.NewFromError(DbReadInternal, err)
-			}
-		}
-	}
-
-	return nil
-}
-
-func setKey(key string, value []byte, ttl time.Duration, slotCommandInput []chan<- command, commandTimeout time.Duration) (SetResponse, *errors.Error[DbWriteErr]) {
+func setKey(key string, value []byte, ttl time.Duration, cache cacheStorage) SetResponse {
 	var expiresAt time.Time
 	if ttl != 0 {
 		expiresAt = time.Now().Add(ttl)
@@ -155,182 +129,110 @@ func setKey(key string, value []byte, ttl time.Duration, slotCommandInput []chan
 		expiresAt:      expiresAt,
 	}
 
-	resp := poolGetValueResponse()
-
-	go func(slotCommands chan<- command, key string, data keyStorage, resp *response[valueResponse]) {
-		slotCommands <- commandSet{
-			Key:  key,
-			data: data,
-			Resp: resp,
-		}
-	}(slotCommandInput[hash.ToSlot(key)], key, data, resp)
-
-	result, err := resp.await(commandTimeout)
-	if err != nil {
-		var zero SetResponse
-		switch err.Cause {
-		case canceled:
-			return zero, errors.NewFromError(DbWriteCanceled, err)
-		default:
-			return zero, errors.NewFromError(DbWriteInternal, err)
-		}
+	resp := &valueResponse{
+		Value:  nil,
+		Exists: false,
 	}
 
-	// If success, put response back. Otherwise, we have no idea when the request might complete and may still be used.
-	poolPutValueResponse(resp)
+	cache.runCommand(hash.ToSlot(key), commandSet{
+		Key:  key,
+		data: data,
+		Resp: resp,
+	})
 
 	return SetResponse{
-		PreviousValue: result.Value,
-		Exists:        result.Exists,
-	}, nil
+		PreviousValue: resp.Value,
+		Exists:        resp.Exists,
+	}
 }
 
-func getKey(key string, slotCommandInput []chan<- command, commandTimeout time.Duration) (GetResponse, *errors.Error[DbReadErr]) {
-	resp := poolGetValueResponse()
-
-	go func(slotCommands chan<- command, key string, resp *response[valueResponse]) {
-		slotCommands <- commandGet{
-			Key:  key,
-			Resp: resp,
-		}
-	}(slotCommandInput[hash.ToSlot(key)], key, resp)
-
-	result, err := resp.await(commandTimeout)
-	if err != nil {
-		var zero GetResponse
-		switch err.Cause {
-		case canceled:
-			return zero, errors.NewFromError(DbReadCanceled, err)
-		default:
-			return zero, errors.NewFromError(DbReadInternal, err)
-		}
+func getKey(key string, cache cacheStorage) GetResponse {
+	resp := &valueResponse{
+		Value:  nil,
+		Exists: false,
 	}
 
-	// If success, put response back. Otherwise, we have no idea when the request might complete and may still be used.
-	poolPutValueResponse(resp)
+	cache.runCommand(hash.ToSlot(key), commandGet{
+		Key:  key,
+		Resp: resp,
+	})
 
-	return GetResponse(result), nil
+	return GetResponse{
+		Value:  resp.Value,
+		Exists: resp.Exists,
+	}
 }
 
-func deleteKey(key string, slotCommandInput []chan<- command, commandTimeout time.Duration) (DeleteResponse, *errors.Error[DbWriteErr]) {
-	resp := poolGetValueResponse()
-
-	go func(slotCommands chan<- command, key string, resp *response[valueResponse]) {
-		slotCommands <- commandDelete{
-			Key:  key,
-			Resp: resp,
-		}
-	}(slotCommandInput[hash.ToSlot(key)], key, resp)
-
-	result, err := resp.await(commandTimeout)
-	if err != nil {
-		var zero DeleteResponse
-		switch err.Cause {
-		case canceled:
-			return zero, errors.NewFromError(DbWriteCanceled, err)
-		default:
-			return zero, errors.NewFromError(DbWriteInternal, err)
-		}
+func deleteKey(key string, cache cacheStorage) DeleteResponse {
+	resp := &valueResponse{
+		Value:  nil,
+		Exists: false,
 	}
 
-	// If success, put response back. Otherwise, we have no idea when the request might complete and may still be used.
-	poolPutValueResponse(resp)
+	cache.runCommand(hash.ToSlot(key), commandDelete{
+		Key:  key,
+		Resp: resp,
+	})
 
 	return DeleteResponse{
-		DeletedValue: result.Value,
-		Exists:       result.Exists,
-	}, nil
+		DeletedValue: resp.Value,
+		Exists:       resp.Exists,
+	}
 }
 
-func expireKey(key string, ttl time.Duration, slotCommandInput []chan<- command, commandTimeout time.Duration) (ExpireResponse, *errors.Error[DbWriteErr]) {
+func expireKey(key string, ttl time.Duration, cache cacheStorage) ExpireResponse {
 	expiresAt := time.Now().Add(ttl)
 
-	resp := poolGetValueResponse()
-
-	go func(slotCommands chan<- command, key string, expiresAt time.Time, resp *response[valueResponse]) {
-		slotCommands <- commandExpire{
-			Key:       key,
-			ExpiresAt: expiresAt,
-			Resp:      resp,
-		}
-	}(slotCommandInput[hash.ToSlot(key)], key, expiresAt, resp)
-
-	result, err := resp.await(commandTimeout)
-	if err != nil {
-		var zero ExpireResponse
-		switch err.Cause {
-		case canceled:
-			return zero, errors.NewFromError(DbWriteCanceled, err)
-		default:
-			return zero, errors.NewFromError(DbWriteInternal, err)
-		}
+	resp := &valueResponse{
+		Value:  nil,
+		Exists: false,
 	}
 
-	// If success, put response back. Otherwise, we have no idea when the request might complete and may still be used.
-	poolPutValueResponse(resp)
+	cache.runCommand(hash.ToSlot(key), commandExpire{
+		Key:       key,
+		ExpiresAt: expiresAt,
+		Resp:      resp,
+	})
 
 	return ExpireResponse{
-		Exists: result.Exists,
-	}, nil
+		Exists: resp.Exists,
+	}
 }
 
-func persistKey(key string, slotCommandInput []chan<- command, commandTimeout time.Duration) (PersistResponse, *errors.Error[DbWriteErr]) {
-	resp := poolGetValueResponse()
-
-	go func(slotCommands chan<- command, key string, resp *response[valueResponse]) {
-		slotCommands <- commandPersist{
-			Key:  key,
-			Resp: resp,
-		}
-	}(slotCommandInput[hash.ToSlot(key)], key, resp)
-
-	result, err := resp.await(commandTimeout)
-	if err != nil {
-		var zero PersistResponse
-		switch err.Cause {
-		case canceled:
-			return zero, errors.NewFromError(DbWriteCanceled, err)
-		default:
-			return zero, errors.NewFromError(DbWriteInternal, err)
-		}
+func persistKey(key string, cache cacheStorage) PersistResponse {
+	resp := &valueResponse{
+		Value:  nil,
+		Exists: false,
 	}
 
-	// If success, put response back. Otherwise, we have no idea when the request might complete and may still be used.
-	poolPutValueResponse(resp)
+	cache.runCommand(hash.ToSlot(key), commandPersist{
+		Key:  key,
+		Resp: resp,
+	})
 
 	return PersistResponse{
-		Exists: result.Exists,
-	}, nil
+		Exists: resp.Exists,
+	}
 }
 
-func ttlKey(key string, slotCommandInput []chan<- command, commandTimeout time.Duration) (TtlResponse, *errors.Error[DbReadErr]) {
-	resp := poolGetTtlResponse()
-
-	go func(slotCommands chan<- command, key string, resp *response[ttlResponse]) {
-		slotCommands <- commandTtl{
-			Key:  key,
-			Resp: resp,
-		}
-	}(slotCommandInput[hash.ToSlot(key)], key, resp)
-
-	result, err := resp.await(commandTimeout)
-	if err != nil {
-		var zero TtlResponse
-		switch err.Cause {
-		case canceled:
-			return zero, errors.NewFromError(DbReadCanceled, err)
-		default:
-			return zero, errors.NewFromError(DbReadInternal, err)
-		}
+func ttlKey(key string, cache cacheStorage) TtlResponse {
+	resp := &ttlResponse{
+		Ttl:    0,
+		Exists: false,
 	}
 
-	// If success, put response back. Otherwise, we have no idea when the request might complete and may still be used.
-	poolPutTtlResponse(resp)
+	cache.runCommand(hash.ToSlot(key), commandTtl{
+		Key:  key,
+		Resp: resp,
+	})
 
-	return TtlResponse(result), nil
+	return TtlResponse{
+		Ttl:    resp.Ttl,
+		Exists: resp.Exists,
+	}
 }
 
-func getDbStats(slotCommandInput []chan<- command, commandTimeout time.Duration) (StatsResponse, *errors.Error[DbReadErr]) {
+func getDbStats(cache cacheStorage) StatsResponse {
 	mutex := &sync.Mutex{}
 	dbStats := StatsResponse{
 		DbSizeInBytes: 0,
@@ -340,100 +242,55 @@ func getDbStats(slotCommandInput []chan<- command, commandTimeout time.Duration)
 
 	for hashSlot := range hash.MaxHashSlot {
 		group.Go(func() error {
-			resp := poolGetStatsResponse()
-
-			go func(slotCommands chan<- command, resp *response[statsResponse]) {
-				slotCommands <- commandStats{
-					Resp: resp,
-				}
-			}(slotCommandInput[hashSlot], resp)
-
-			result, err := resp.await(commandTimeout)
-			if err != nil {
-				switch err.Cause {
-				case canceled:
-					return errors.NewFromError(DbReadCanceled, err)
-				default:
-					return errors.NewFromError(DbReadInternal, err)
-				}
+			resp := &statsResponse{
+				sizeInBytes: 0,
 			}
 
-			// If success, put response back. Otherwise, we have no idea when the request might complete and may still be used.
-			poolPutStatsResponse(resp)
+			cache.runCommand(hashSlot, commandStats{
+				Resp: resp,
+			})
 
 			mutex.Lock()
-			dbStats.DbSizeInBytes += result.sizeInBytes
+			dbStats.DbSizeInBytes += resp.sizeInBytes
 			mutex.Unlock()
 
 			return nil
 		})
 	}
 
-	if err := group.Wait(); err != nil {
-		return dbStats, err.(*errors.Error[DbReadErr]) //nolint:errorlint,forcetypeassert,revive // reason: It is not possible to be any other type.
-	}
+	_ = group.Wait() // The goroutines return no error.
 
-	return dbStats, nil
+	return dbStats
 }
 
-func deleteExpired(hashSlot hash.Slot, slotCommandInput []chan<- command, commandTimeout time.Duration) *errors.Error[DbWriteErr] {
-	resp := poolGetValueResponse()
-
-	go func(slotCommands chan<- command, resp *response[valueResponse]) {
-		slotCommands <- commandDeleteExpired{
-			Resp: resp,
-		}
-	}(slotCommandInput[hashSlot], resp)
-
-	_, err := resp.await(commandTimeout)
-	if err != nil {
-		switch err.Cause {
-		case canceled:
-			return errors.NewFromError(DbWriteCanceled, err)
-		default:
-			return errors.NewFromError(DbWriteInternal, err)
-		}
+func deleteExpired(hashSlot hash.Slot, cache cacheStorage) {
+	resp := &valueResponse{
+		Value:  nil,
+		Exists: false,
 	}
 
-	// If success, put response back. Otherwise, we have no idea when the request might complete and may still be used.
-	poolPutValueResponse(resp)
-
-	return nil
+	cache.runCommand(hashSlot, commandDeleteExpired{
+		Resp: resp,
+	})
 }
 
-func deleteLru(slotCommandInput []chan<- command, commandTimeout time.Duration) *errors.Error[DbWriteErr] {
+func deleteLru(cache cacheStorage) {
 	group := errgroup.Group{}
 
 	for hashSlot := range hash.MaxHashSlot {
 		group.Go(func() error {
-			resp := poolGetValueResponse()
-
-			go func(slotCommands chan<- command, resp *response[valueResponse]) {
-				slotCommands <- commandDeleteLru{
-					Resp: resp,
-				}
-			}(slotCommandInput[hashSlot], resp)
-
-			_, err := resp.await(commandTimeout)
-			if err != nil {
-				switch err.Cause {
-				case canceled:
-					return errors.NewFromError(DbWriteCanceled, err)
-				default:
-					return errors.NewFromError(DbWriteInternal, err)
-				}
+			resp := &valueResponse{
+				Value:  nil,
+				Exists: false,
 			}
 
-			// If success, put response back. Otherwise, we have no idea when the request might complete and may still be used.
-			poolPutValueResponse(resp)
+			cache.runCommand(hashSlot, commandDeleteLru{
+				Resp: resp,
+			})
 
 			return nil
 		})
 	}
 
-	if err := group.Wait(); err != nil {
-		return err.(*errors.Error[DbWriteErr]) //nolint:errorlint,forcetypeassert,revive // reason: It is not possible to be any other type.
-	}
-
-	return nil
+	_ = group.Wait() // The goroutines return no error
 }

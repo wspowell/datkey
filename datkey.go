@@ -41,14 +41,27 @@ type Config struct {
 	// CommandTimeout for each command request.
 	// Default: 1s
 	CommandTimeout time.Duration
+
+	// MaxConcurrency of commands that can be run on the data storage.
+	// Default: 1 (disables use of worker pool)
+	MaxConcurrency int
+
+	// EvictionFrequency time between iterations of checking for evicted keys.
+	// Default: 30s
+	EvictionFrequency time.Duration
+
+	// ExpirationFrequency time between iterations of checking for expired keys and freeing their memory.
+	// Default: 30s
+	ExpirationFrequency time.Duration
 }
 
 type Datkey struct {
-	slotCommandInput      []chan<- command
 	waitForEvictionWorker <-chan struct{}
 	waitForExpireWorker   <-chan struct{}
-	cancelFunc            context.CancelFunc
-	config                Config
+
+	cache      cacheStorage
+	cancelFunc context.CancelFunc
+	config     Config
 }
 
 func New(config Config) *Datkey {
@@ -60,69 +73,71 @@ func New(config Config) *Datkey {
 		config.EvictStrategy = EvictByLRU
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	if config.MaxConcurrency == 0 {
+		config.MaxConcurrency = 1
+	}
 
-	slotCommandInput := startSlotWorkers(config)
+	if config.EvictionFrequency == 0 {
+		config.EvictionFrequency = 30 * time.Second //nolint:mnd // reason: default value
+	}
+
+	if config.ExpirationFrequency == 0 {
+		config.ExpirationFrequency = 30 * time.Second //nolint:mnd // reason: default value
+	}
+
+	cache := newCacheStorage(config.MaxConcurrency)
+
+	ctx, cancel := context.WithCancel(context.Background())
 
 	return &Datkey{
 		config:                config,
-		slotCommandInput:      slotCommandInput,
+		cache:                 cache,
 		cancelFunc:            cancel,
-		waitForEvictionWorker: startEvictionWorker(ctx, config, slotCommandInput),
-		waitForExpireWorker:   startExpireWorker(ctx, config, slotCommandInput),
+		waitForEvictionWorker: startEvictionWorker(ctx, config, cache),
+		waitForExpireWorker:   startExpireWorker(ctx, config, cache),
 	}
 }
 
 func (self *Datkey) Close() {
 	self.cancelFunc()
-
-	<-self.waitForEvictionWorker
-	<-self.waitForExpireWorker
-
-	// Wait for any outstanding commands to complete or timeout.
-	time.Sleep(self.config.CommandTimeout)
-
-	for index := range self.slotCommandInput {
-		close(self.slotCommandInput[index])
-	}
 }
 
 // Set a key in the database.
 // If ttl=0, then the key will never expire.
-func (self *Datkey) Set(key string, value []byte, ttl time.Duration) (SetResponse, *errors.Error[DbWriteErr]) {
-	return setKey(key, value, ttl, self.slotCommandInput, self.config.CommandTimeout)
+func (self *Datkey) Set(key string, value []byte, ttl time.Duration) SetResponse {
+	return setKey(key, value, ttl, self.cache)
 }
 
 // Delete a key in the database.
-func (self *Datkey) Delete(key string) (DeleteResponse, *errors.Error[DbWriteErr]) {
-	return deleteKey(key, self.slotCommandInput, self.config.CommandTimeout)
+func (self *Datkey) Delete(key string) DeleteResponse {
+	return deleteKey(key, self.cache)
 }
 
 // Get a key from the database.
-func (self *Datkey) Get(key string) (GetResponse, *errors.Error[DbReadErr]) {
-	return getKey(key, self.slotCommandInput, self.config.CommandTimeout)
+func (self *Datkey) Get(key string) GetResponse {
+	return getKey(key, self.cache)
 }
 
 // Expire a key in the database in a given TTL.
-func (self *Datkey) Expire(key string, ttl time.Duration) (ExpireResponse, *errors.Error[DbWriteErr]) {
-	return expireKey(key, ttl, self.slotCommandInput, self.config.CommandTimeout)
+func (self *Datkey) Expire(key string, ttl time.Duration) ExpireResponse {
+	return expireKey(key, ttl, self.cache)
 }
 
 // Persist a key in the database by removing any TTL.
-func (self *Datkey) Persist(key string) (PersistResponse, *errors.Error[DbWriteErr]) {
-	return persistKey(key, self.slotCommandInput, self.config.CommandTimeout)
+func (self *Datkey) Persist(key string) PersistResponse {
+	return persistKey(key, self.cache)
 }
 
 // Ttl value of a key in the database.
-func (self *Datkey) Ttl(key string) (TtlResponse, *errors.Error[DbReadErr]) {
-	return ttlKey(key, self.slotCommandInput, self.config.CommandTimeout)
+func (self *Datkey) Ttl(key string) TtlResponse {
+	return ttlKey(key, self.cache)
 }
 
-// Ttl value of a key in the database.
-func (self *Datkey) Ping() *errors.Error[DbReadErr] {
-	return ping(self.slotCommandInput, self.config.CommandTimeout)
+// Ping the database.
+func (_ *Datkey) Ping() *errors.Error[DbReadErr] {
+	return nil
 }
 
-func (self *Datkey) Stats() (StatsResponse, *errors.Error[DbReadErr]) {
-	return getDbStats(self.slotCommandInput, self.config.CommandTimeout)
+func (self *Datkey) Stats() StatsResponse {
+	return getDbStats(self.cache)
 }

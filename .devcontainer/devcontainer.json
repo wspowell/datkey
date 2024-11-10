@@ -47,7 +47,9 @@
                 "mutantdino.resourcemonitor",
                 "streetsidesoftware.code-spell-checker",
                 "usernamehw.errorlens",
-                "albymor.increment-selection"
+                "albymor.increment-selection",
+                "ms-azuretools.vscode-docker",
+                "ms-vscode.makefile-tools"
             ]
         }
     }

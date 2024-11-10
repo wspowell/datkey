@@ -2,167 +2,189 @@ package datkey
 
 import (
 	"fmt"
+	"sync"
 	"time"
+
+	"github.com/alitto/pond"
 
 	"github.com/wspowell/datkey/hash"
 )
 
-func startSlotWorkers(config Config) []chan<- command {
-	slotCommandInput := make([]chan<- command, hash.MaxHashSlot)
-
-	for slot := range hash.MaxHashSlot {
-		commandChannel := make(chan command)
-		slotCommandInput[slot] = commandChannel
-
-		go slotWorker(commandChannel)
-	}
-
-	if err := ping(slotCommandInput, config.CommandTimeout); err != nil {
-		panic(fmt.Sprintf("failed to start slot workers (timeout=%fs): %+v", config.CommandTimeout.Seconds(), err))
-	}
-
-	return slotCommandInput
+type cacheStorage struct {
+	workerPool *pond.WorkerPool
+	slots      []*slotStorage
 }
 
-type slotCache struct {
+func newCacheStorage(maxConcurrency int) cacheStorage {
+	hashSlotStorage := make([]*slotStorage, hash.MaxHashSlot)
+	for index := range hashSlotStorage {
+		hashSlotStorage[index] = &slotStorage{
+			sizeInBytes: 0,
+			storage:     map[string]keyStorage{},
+			mutex:       sync.Mutex{},
+		}
+	}
+
+	var workerPool *pond.WorkerPool
+	if maxConcurrency > 1 {
+		maxWorkers := maxConcurrency
+		maxTaskCapacity := maxConcurrency
+		workerPool = pond.New(maxWorkers, maxTaskCapacity, pond.Strategy(pond.Eager()))
+	}
+
+	return cacheStorage{
+		workerPool: workerPool,
+		slots:      hashSlotStorage,
+	}
+}
+
+func (self cacheStorage) runCommand(hashSlot hash.Slot, cmd command) {
+	if self.workerPool != nil {
+		self.workerPool.SubmitAndWait(func() {
+			hashSlotStorage := self.slots[hashSlot]
+			hashSlotStorage.processCommand(cmd)
+		})
+	} else {
+		hashSlotStorage := self.slots[hashSlot]
+		hashSlotStorage.processCommand(cmd)
+	}
+}
+
+type slotStorage struct {
 	storage     map[string]keyStorage
+	mutex       sync.Mutex
 	sizeInBytes int64
 }
 
-func slotWorker(commandChannel <-chan command) {
-	cache := &slotCache{
-		sizeInBytes: 0,
-		storage:     map[string]keyStorage{},
-	}
+func (self *slotStorage) processCommand(command command) {
+	self.mutex.Lock()
 
-	for command := range commandChannel {
-		commandHandler(cache, command)
-	}
-}
-
-func commandHandler(cache *slotCache, command command) {
 	switch cmd := command.(type) {
 	case commandSet:
-		previousData, exists := cache.storage[cmd.Key]
-		cache.sizeInBytes += int64(-len(previousData.value))
+		previousData, exists := self.storage[cmd.Key]
+		self.sizeInBytes += int64(-len(previousData.value))
 		if previousData.isExpired() {
 			exists = false
 			previousData.value = nil
 		}
-		cache.storage[cmd.Key] = cmd.data
-		cache.sizeInBytes += int64(len(cmd.data.value))
-		cmd.Resp.send(valueResponse{
-			Exists: exists,
-			Value:  previousData.value,
-		})
+		self.storage[cmd.Key] = cmd.data
+		self.sizeInBytes += int64(len(cmd.data.value))
+		cmd.Resp.Exists = exists
+		cmd.Resp.Value = previousData.value
+
+		self.mutex.Unlock()
 	case commandGet:
-		data, exists := cache.storage[cmd.Key]
+		data, exists := self.storage[cmd.Key]
 		if data.isExpired() {
-			cache.sizeInBytes += int64(-len(data.value))
+			self.sizeInBytes += int64(-len(data.value))
 			exists = false
 			data.value = nil
-			delete(cache.storage, cmd.Key)
+			delete(self.storage, cmd.Key)
 		} else if exists {
 			data.lastAccessTime = time.Now()
-			cache.storage[cmd.Key] = data
+			self.storage[cmd.Key] = data
 		}
-		cmd.Resp.send(valueResponse{
-			Exists: exists,
-			Value:  data.value,
-		})
+		cmd.Resp.Exists = exists
+		cmd.Resp.Value = data.value
+
+		self.mutex.Unlock()
 	case commandDelete:
-		handleCommandDelete(cache, cmd)
+		self.handleCommandDelete(cmd)
+
+		self.mutex.Unlock()
 	case commandExpire:
-		previousData, exists := cache.storage[cmd.Key]
+		previousData, exists := self.storage[cmd.Key]
 		if previousData.isExpired() {
-			cache.sizeInBytes += int64(-len(previousData.value))
+			self.sizeInBytes += int64(-len(previousData.value))
 			exists = false
 			previousData.value = nil
-			delete(cache.storage, cmd.Key)
+			delete(self.storage, cmd.Key)
 		} else if exists {
 			previousData.expiresAt = cmd.ExpiresAt
-			cache.storage[cmd.Key] = previousData
+			self.storage[cmd.Key] = previousData
 		}
-		cmd.Resp.send(valueResponse{
-			Exists: exists,
-			Value:  previousData.value,
-		})
+		cmd.Resp.Exists = exists
+		cmd.Resp.Value = previousData.value
+
+		self.mutex.Unlock()
 	case commandPersist:
-		previousData, exists := cache.storage[cmd.Key]
+		previousData, exists := self.storage[cmd.Key]
 		if previousData.isExpired() {
-			cache.sizeInBytes += int64(-len(previousData.value))
+			self.sizeInBytes += int64(-len(previousData.value))
 			exists = false
-			delete(cache.storage, cmd.Key)
+			delete(self.storage, cmd.Key)
 		} else if exists {
 			previousData.expiresAt = time.Time{}
-			cache.storage[cmd.Key] = previousData
+			self.storage[cmd.Key] = previousData
 		}
-		cmd.Resp.send(valueResponse{
-			Exists: exists,
-			Value:  previousData.value,
-		})
+		cmd.Resp.Exists = exists
+		cmd.Resp.Value = previousData.value
+
+		self.mutex.Unlock()
 	case commandTtl:
-		previousData, exists := cache.storage[cmd.Key]
+		previousData, exists := self.storage[cmd.Key]
 		var ttl time.Duration
 		if previousData.isExpired() {
-			cache.sizeInBytes += int64(-len(previousData.value))
+			self.sizeInBytes += int64(-len(previousData.value))
 			exists = false
-			delete(cache.storage, cmd.Key)
+			delete(self.storage, cmd.Key)
 		} else if exists && !previousData.expiresAt.IsZero() {
 			ttl = time.Until(previousData.expiresAt)
 		}
-		cmd.Resp.send(ttlResponse{
-			Exists: exists,
-			Ttl:    ttl,
-		})
+		cmd.Resp.Exists = exists
+		cmd.Resp.Ttl = ttl
+
+		self.mutex.Unlock()
 	case commandPing:
-		cmd.Resp.send(struct{}{})
+		self.mutex.Unlock()
 	case commandStats:
-		cmd.Resp.send(statsResponse{
-			sizeInBytes: cache.sizeInBytes,
-		})
+		cmd.Resp.sizeInBytes = self.sizeInBytes
+
+		self.mutex.Unlock()
 	case commandDeleteExpired:
-		for key := range cache.storage {
+		for key := range self.storage {
 			// Prune expired keys.
 			// TODO: This could be non-performant for large caches and might need to be works a bit smarter with sampling or other strategy.
-			if cache.storage[key].isExpired() {
-				cache.sizeInBytes += int64(-len(cache.storage[key].value))
-				delete(cache.storage, key)
+			if self.storage[key].isExpired() {
+				self.sizeInBytes += int64(-len(self.storage[key].value))
+				delete(self.storage, key)
 			}
 		}
-		cmd.Resp.send(valueResponse{
-			Exists: false,
-			Value:  nil,
-		})
+		cmd.Resp.Exists = false
+		cmd.Resp.Value = nil
+
+		self.mutex.Unlock()
 	case commandDeleteLru:
 		var lruKey string
 		var lruAccessTime time.Time
-		for key := range cache.storage {
-			if lruAccessTime.IsZero() || cache.storage[key].lastAccessTime.Before(lruAccessTime) {
+		for key := range self.storage {
+			if lruAccessTime.IsZero() || self.storage[key].lastAccessTime.Before(lruAccessTime) {
 				lruKey = key
-				lruAccessTime = cache.storage[key].lastAccessTime
+				lruAccessTime = self.storage[key].lastAccessTime
 			}
 		}
-		handleCommandDelete(cache, commandDelete{
+		self.handleCommandDelete(commandDelete{
 			Key:  lruKey,
 			Resp: cmd.Resp,
 		})
+
+		self.mutex.Unlock()
 	default:
+		self.mutex.Unlock()
+
 		// This should never be hit and would indicate an internal library issue, so trigger a panic.
 		panic(fmt.Sprintf("unexpected command type: %T, %+v", command, command))
 	}
 }
 
-func handleCommandDelete(cache *slotCache, cmd commandDelete) {
-	previousData, exists := cache.storage[cmd.Key]
-	cache.sizeInBytes += int64(-len(previousData.value))
+func (self *slotStorage) handleCommandDelete(cmd commandDelete) {
+	previousData, exists := self.storage[cmd.Key]
+	self.sizeInBytes += int64(-len(previousData.value))
 	if previousData.isExpired() {
 		exists = false
 		previousData.value = nil
 	}
-	delete(cache.storage, cmd.Key)
-	cmd.Resp.send(valueResponse{
-		Exists: exists,
-		Value:  previousData.value,
-	})
+	delete(self.storage, cmd.Key)
+	cmd.Resp.Exists = exists
+	cmd.Resp.Value = previousData.value
 }

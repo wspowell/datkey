@@ -9,9 +9,17 @@ import (
 	"github.com/wspowell/datkey"
 )
 
+//nolint:gochecknoglobals // reason: Preloads this slice for all bench tests.
+var guids []string
+
+//nolint:gochecknoinits // reason: Preloads this slice for all bench tests.
+func init() {
+	guids = generateGuids()
+}
+
 // Generate guids to avoid impacting benchmarks with guid generation.
 func generateGuids() []string {
-	ids := make([]string, 1000000)
+	ids := make([]string, 10000000)
 	for index := range ids {
 		id, _ := uuid.GenerateUUID()
 		ids[index] = id
@@ -24,13 +32,12 @@ func BenchmarkDatKeySet_sync(b *testing.B) {
 	client := datkey.New(config)
 	defer client.Close()
 
+	data := []byte("value")
+
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		_, err := client.Set("test", []byte("value"), 0)
-		if err != nil {
-			panic(err)
-		}
+		_ = client.Set("test", data, 0)
 	}
 
 	b.StopTimer()
@@ -41,14 +48,13 @@ func BenchmarkDatKeySet_async(b *testing.B) {
 	client := datkey.New(config)
 	defer client.Close()
 
+	data := []byte("value")
+
 	b.ResetTimer()
 
 	b.RunParallel(func(p *testing.PB) {
 		for p.Next() {
-			_, err := client.Set("test", []byte("value"), 0)
-			if err != nil {
-				panic(err)
-			}
+			_ = client.Set("test", data, 0)
 		}
 	})
 
@@ -60,16 +66,13 @@ func BenchmarkDatKeySet_multikey_sync(b *testing.B) {
 	client := datkey.New(config)
 	defer client.Close()
 
-	guids := generateGuids()
+	data := []byte("value")
 
 	b.ResetTimer()
 
 	var idIndex int
 	for i := 0; i < b.N; i++ {
-		_, err := client.Set(guids[idIndex], []byte("value"), 0)
-		if err != nil {
-			panic(err)
-		}
+		_ = client.Set(guids[idIndex], data, 0)
 		idIndex++
 	}
 
@@ -81,17 +84,14 @@ func BenchmarkDatKeySet_multikey_async(b *testing.B) {
 	client := datkey.New(config)
 	defer client.Close()
 
-	guids := generateGuids()
+	data := []byte("value")
 
 	b.ResetTimer()
 
 	b.RunParallel(func(p *testing.PB) {
 		var idIndex int
 		for p.Next() {
-			_, err := client.Set(guids[idIndex], []byte("value"), 0)
-			if err != nil {
-				panic(err)
-			}
+			_ = client.Set(guids[idIndex], data, 0)
 			idIndex++
 		}
 	})
@@ -104,18 +104,12 @@ func BenchmarkDatKeyGet_sync(b *testing.B) {
 	client := datkey.New(config)
 	defer client.Close()
 
-	_, err := client.Set("test", []byte("value"), 0)
-	if err != nil {
-		panic(err)
-	}
+	_ = client.Set("test", []byte("value"), 0)
 
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		_, err := client.Get("test")
-		if err != nil {
-			panic(err)
-		}
+		_ = client.Get("test")
 	}
 
 	b.StopTimer()
@@ -126,19 +120,13 @@ func BenchmarkDatKeyGet_async(b *testing.B) {
 	client := datkey.New(config)
 	defer client.Close()
 
-	_, err := client.Set("test", []byte("value"), 0)
-	if err != nil {
-		panic(err)
-	}
+	_ = client.Set("test", []byte("value"), 0)
 
 	b.ResetTimer()
 
 	b.RunParallel(func(p *testing.PB) {
 		for p.Next() {
-			_, err := client.Get("test")
-			if err != nil {
-				panic(err)
-			}
+			_ = client.Get("test")
 		}
 	})
 
@@ -150,23 +138,15 @@ func BenchmarkDatKeyGet_multikey_sync(b *testing.B) {
 	client := datkey.New(config)
 	defer client.Close()
 
-	guids := generateGuids()
-
 	for index := range guids {
-		_, err := client.Set(guids[index], []byte("value"), 0)
-		if err != nil {
-			panic(err)
-		}
+		_ = client.Set(guids[index], []byte("value"), 0)
 	}
 
 	b.ResetTimer()
 
 	var idIndex int
 	for i := 0; i < b.N; i++ {
-		_, err := client.Get(guids[idIndex])
-		if err != nil {
-			panic(err)
-		}
+		_ = client.Get(guids[idIndex])
 		idIndex++
 	}
 
@@ -178,13 +158,8 @@ func BenchmarkDatKeyGet_multikey_async(b *testing.B) {
 	client := datkey.New(config)
 	defer client.Close()
 
-	guids := generateGuids()
-
 	for index := range guids {
-		_, err := client.Set(guids[index], []byte("value"), 0)
-		if err != nil {
-			panic(err)
-		}
+		_ = client.Set(guids[index], []byte("value"), 0)
 	}
 
 	b.ResetTimer()
@@ -192,10 +167,7 @@ func BenchmarkDatKeyGet_multikey_async(b *testing.B) {
 	b.RunParallel(func(p *testing.PB) {
 		var idIndex int
 		for p.Next() {
-			_, err := client.Get(guids[idIndex])
-			if err != nil {
-				panic(err)
-			}
+			_ = client.Get(guids[idIndex])
 			idIndex++
 		}
 	})
@@ -208,13 +180,12 @@ func BenchmarkDatKeySet_sync_with_TTL(b *testing.B) {
 	client := datkey.New(config)
 	defer client.Close()
 
+	data := []byte("value")
+
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		_, err := client.Set("test", []byte("value"), time.Second)
-		if err != nil {
-			panic(err)
-		}
+		_ = client.Set("test", data, time.Second)
 	}
 
 	b.StopTimer()
@@ -225,14 +196,13 @@ func BenchmarkDatKeySet_async_with_TTL(b *testing.B) {
 	client := datkey.New(config)
 	defer client.Close()
 
+	data := []byte("value")
+
 	b.ResetTimer()
 
 	b.RunParallel(func(p *testing.PB) {
 		for p.Next() {
-			_, err := client.Set("test", []byte("value"), time.Second)
-			if err != nil {
-				panic(err)
-			}
+			_ = client.Set("test", data, time.Second)
 		}
 	})
 
@@ -244,16 +214,13 @@ func BenchmarkDatKeySet_multikey_sync_with_TTL(b *testing.B) {
 	client := datkey.New(config)
 	defer client.Close()
 
-	guids := generateGuids()
+	data := []byte("value")
 
 	b.ResetTimer()
 
 	var idIndex int
 	for i := 0; i < b.N; i++ {
-		_, err := client.Set(guids[idIndex], []byte("value"), time.Second)
-		if err != nil {
-			panic(err)
-		}
+		_ = client.Set(guids[idIndex], data, time.Second)
 		idIndex++
 	}
 
@@ -265,17 +232,14 @@ func BenchmarkDatKeySet_multikey_async_with_TTL(b *testing.B) {
 	client := datkey.New(config)
 	defer client.Close()
 
-	guids := generateGuids()
+	data := []byte("value")
 
 	b.ResetTimer()
 
 	b.RunParallel(func(p *testing.PB) {
 		var idIndex int
 		for p.Next() {
-			_, err := client.Set(guids[idIndex], []byte("value"), time.Second)
-			if err != nil {
-				panic(err)
-			}
+			_ = client.Set(guids[idIndex], data, time.Second)
 			idIndex++
 		}
 	})
@@ -288,18 +252,12 @@ func BenchmarkDatKeyGet_sync_with_TTL(b *testing.B) {
 	client := datkey.New(config)
 	defer client.Close()
 
-	_, err := client.Set("test", []byte("value"), time.Second)
-	if err != nil {
-		panic(err)
-	}
+	_ = client.Set("test", []byte("value"), time.Second)
 
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		_, err := client.Get("test")
-		if err != nil {
-			panic(err)
-		}
+		_ = client.Get("test")
 	}
 
 	b.StopTimer()
@@ -310,19 +268,13 @@ func BenchmarkDatKeyGet_async_with_TTL(b *testing.B) {
 	client := datkey.New(config)
 	defer client.Close()
 
-	_, err := client.Set("test", []byte("value"), time.Second)
-	if err != nil {
-		panic(err)
-	}
+	_ = client.Set("test", []byte("value"), time.Second)
 
 	b.ResetTimer()
 
 	b.RunParallel(func(p *testing.PB) {
 		for p.Next() {
-			_, err := client.Get("test")
-			if err != nil {
-				panic(err)
-			}
+			_ = client.Get("test")
 		}
 	})
 
@@ -334,23 +286,15 @@ func BenchmarkDatKeyGet_multikey_sync_with_TTL(b *testing.B) {
 	client := datkey.New(config)
 	defer client.Close()
 
-	guids := generateGuids()
-
 	for index := range guids {
-		_, err := client.Set(guids[index], []byte("value"), time.Second)
-		if err != nil {
-			panic(err)
-		}
+		_ = client.Set(guids[index], []byte("value"), time.Second)
 	}
 
 	b.ResetTimer()
 
 	var idIndex int
 	for i := 0; i < b.N; i++ {
-		_, err := client.Get(guids[idIndex])
-		if err != nil {
-			panic(err)
-		}
+		_ = client.Get(guids[idIndex])
 		idIndex++
 	}
 
@@ -362,13 +306,8 @@ func BenchmarkDatKeyGet_multikey_async_with_TTL(b *testing.B) {
 	client := datkey.New(config)
 	defer client.Close()
 
-	guids := generateGuids()
-
 	for index := range guids {
-		_, err := client.Set(guids[index], []byte("value"), time.Second)
-		if err != nil {
-			panic(err)
-		}
+		_ = client.Set(guids[index], []byte("value"), time.Second)
 	}
 
 	b.ResetTimer()
@@ -376,10 +315,7 @@ func BenchmarkDatKeyGet_multikey_async_with_TTL(b *testing.B) {
 	b.RunParallel(func(p *testing.PB) {
 		var idIndex int
 		for p.Next() {
-			_, err := client.Get(guids[idIndex])
-			if err != nil {
-				panic(err)
-			}
+			_ = client.Get(guids[idIndex])
 			idIndex++
 		}
 	})

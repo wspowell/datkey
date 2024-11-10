@@ -10,16 +10,24 @@ This library provides an in-memory key/value store for a single process, intende
 go test -benchmem -bench . ./
 goos: linux
 goarch: amd64
-pkg: datkey
+pkg: github.com/wspowell/datkey
 cpu: AMD Ryzen 9 4900HS with Radeon Graphics         
-BenchmarkDatKeySet_sync-8                 817545              1367 ns/op             258 B/op          3 allocs/op
-BenchmarkDatKeySet_async-8               1256470               913.8 ns/op           248 B/op          3 allocs/op
-BenchmarkDatKeySet_multikey_sync-8        519902              3184 ns/op             587 B/op          3 allocs/op
-BenchmarkDatKeySet_multikey_async-8      2462672               519.8 ns/op           265 B/op          3 allocs/op
-BenchmarkDatKeyGet_sync-8                 928467              1244 ns/op              98 B/op          2 allocs/op
-BenchmarkDatKeyGet_async-8               1000000              1033 ns/op              89 B/op          2 allocs/op
-BenchmarkDatKeyGet_multikey_sync-8        378552              2739 ns/op              78 B/op          2 allocs/op
-BenchmarkDatKeyGet_multikey_async-8      2969695               455.9 ns/op            72 B/op          2 allocs/op
+BenchmarkDatKeySet_sync-8                        6529369               198.5 ns/op           128 B/op          2 allocs/op
+BenchmarkDatKeySet_async-8                       4725535               246.3 ns/op           128 B/op          2 allocs/op
+BenchmarkDatKeySet_multikey_sync-8               1000000              1099 ns/op             522 B/op          2 allocs/op
+BenchmarkDatKeySet_multikey_async-8             11551862               144.3 ns/op           167 B/op          2 allocs/op
+BenchmarkDatKeyGet_sync-8                        5769628               193.2 ns/op            56 B/op          2 allocs/op
+BenchmarkDatKeyGet_async-8                       4065962               270.7 ns/op            56 B/op          2 allocs/op
+BenchmarkDatKeyGet_multikey_sync-8               1777310               681.8 ns/op            56 B/op          2 allocs/op
+BenchmarkDatKeyGet_multikey_async-8             12924740                96.51 ns/op           56 B/op          2 allocs/op
+BenchmarkDatKeySet_sync_with_TTL-8               4245423               281.5 ns/op           128 B/op          2 allocs/op
+BenchmarkDatKeySet_async_with_TTL-8              3462932               331.1 ns/op           128 B/op          2 allocs/op
+BenchmarkDatKeySet_multikey_sync_with_TTL-8      1000000              1216 ns/op             522 B/op          2 allocs/op
+BenchmarkDatKeySet_multikey_async_with_TTL-8    10445972               152.5 ns/op           169 B/op          2 allocs/op
+BenchmarkDatKeyGet_sync_with_TTL-8               5753263               188.1 ns/op            56 B/op          2 allocs/op
+BenchmarkDatKeyGet_async_with_TTL-8              3634720               287.6 ns/op            56 B/op          2 allocs/op
+BenchmarkDatKeyGet_multikey_sync_with_TTL-8      1767836               677.7 ns/op            56 B/op          2 allocs/op
+BenchmarkDatKeyGet_multikey_async_with_TTL-8    12291062                97.57 ns/op           56 B/op          2 allocs/op
 ```
 
 ```
